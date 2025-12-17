@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echoes of the Void</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #050505;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #fff;
+            font-family: monospace;
+        }
+
+        canvas {
+            display: block;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>Echoes of the Void</h1>
+        <p>Press <b>SPACE</b> to Echolocate</p>
+        <p>Use <b>WASD</b> to Move</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        // --- InputHandler.js ---
+        class InputHandler {
+            constructor() {
+                this.keys = {};
+                this.justPressed = {};
+                
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (!this.keys[e.code]) { 
+                        // logic
+                    }
+                    this.justPressed[e.code] = true;
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+            }
+
+            isDown(code) {
+                return !!this.keys[code];
+            }
+            
+            isPressed(code) {
+                if (this.justPressed[code]) {
+                    this.justPressed[code] = false;
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // --- Particle.js ---
+        class Particle {
+            constructor(game, x, y, color) {
+                this.game = game;
+                this.x = x;
+                this.y = y;
+                this.color = color || 'rgba(255, 255, 255, 0.8)';
+                this.size = Math.random() * 2 + 1;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.5 + 0.5;
+            }
+
+            update(deltaTime) {
+                this.life -= this.decay * deltaTime;
+            }
+
+            draw(ctx) {
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // --- Pulse.js ---
+        class Pulse {
+            constructor(game, x, y) {
+                this.game = game;
+                this.x = x;
+                this.y = y;
+                this.radius = 0;
+                this.speed = 300; 
+                this.maxRadius = 600;
+                this.active = true;
+                this.life = 1.0; 
+                this.decay = 0.5; 
+            }
+
+            update(deltaTime) {
+                const prevRadius = this.radius;
+                this.radius += this.speed * deltaTime;
+                this.life -= this.decay * deltaTime;
+
+                if (this.life <= 0 || this.radius > this.maxRadius) {
+                    this.active = false;
+                }
+
+                // Check collision with lines
+                const lines = this.game.level.lines;
+                for (let line of lines) {
+                    this.checkLineCollision(line, prevRadius, this.radius);
+                }
+            }
+
+            checkLineCollision(line, r1, r2) {
+                const l2 = this.dist2(line.x1, line.y1, line.x2, line.y2);
+                if (l2 == 0) return; 
+                
+                let t = ((this.x - line.x1) * (line.x2 - line.x1) + (this.y - line.y1) * (line.y2 - line.y1)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                
+                const closestX = line.x1 + t * (line.x2 - line.x1);
+                const closestY = line.y1 + t * (line.y2 - line.y1);
+                
+                const distSq = this.dist2(this.x, this.y, closestX, closestY);
+                const dist = Math.sqrt(distSq);
+
+                if (dist >= r1 && dist <= r2) {
+                     this.game.addParticle(closestX, closestY, `rgba(100, 255, 255, ${this.life})`);
+                }
+            }
+
+            dist2(x1, y1, x2, y2) { 
+                return (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2); 
+            }
+
+            draw(ctx) {
+                if (!this.active) return;
+                ctx.strokeStyle = `rgba(255, 255, 255, ${this.life * 0.3})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        // --- Level.js ---
+        class Level {
+            constructor(game) {
+                this.game = game;
+                this.lines = [];
+                this.goal = {x: 700, y: 500, r: 20}; 
+
+                // Outer Bounds
+                this.addRect(10, 10, 780, 580);
+
+                // Maze walls
+                this.addLine(10, 200, 300, 200);
+                this.addLine(300, 200, 300, 100);
+                
+                this.addLine(500, 10, 500, 300);
+                
+                this.addLine(200, 400, 600, 400);
+                this.addLine(600, 400, 600, 300);
+                
+                this.addLine(100, 500, 200, 500);
+            }
+
+            addRect(x, y, w, h) {
+                this.addLine(x, y, x + w, y);
+                this.addLine(x + w, y, x + w, y + h);
+                this.addLine(x + w, y + h, x, y + h);
+                this.addLine(x, y + h, x, y);
+            }
+
+            addLine(x1, y1, x2, y2) {
+                this.lines.push({x1, y1, x2, y2});
+            }
+
+            update(deltaTime) {}
+
+            draw(ctx) {
+                ctx.strokeStyle = '#0f0';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.goal.x, this.goal.y, this.goal.r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        // --- Player.js ---
+        class Player {
+            constructor(game) {
+                this.game = game;
+                this.x = 100;
+                this.y = 100;
+                this.radius = 10;
+                this.speed = 200; 
+                this.vx = 0;
+                this.vy = 0;
+            }
+
+            update(deltaTime) {
+                this.vx = 0;
+                this.vy = 0;
+
+                if (this.game.input.isDown('KeyW') || this.game.input.isDown('ArrowUp')) {
+                    this.vy = -this.speed;
+                }
+                if (this.game.input.isDown('KeyS') || this.game.input.isDown('ArrowDown')) {
+                    this.vy = this.speed;
+                }
+                if (this.game.input.isDown('KeyA') || this.game.input.isDown('ArrowLeft')) {
+                    this.vx = -this.speed;
+                }
+                if (this.game.input.isDown('KeyD') || this.game.input.isDown('ArrowRight')) {
+                    this.vx = this.speed;
+                }
+
+                // Apply movement with checks
+                const nextX = this.x + this.vx * deltaTime;
+                const nextY = this.y + this.vy * deltaTime;
+                this.checkCollisions(nextX, nextY);
+
+                // Bounds checking
+                if (this.x < this.radius) this.x = this.radius;
+                if (this.y < this.radius) this.y = this.radius;
+                if (this.x > this.game.width - this.radius) this.x = this.game.width - this.radius;
+                if (this.y > this.game.height - this.radius) this.y = this.game.height - this.radius;
+
+                // Pulse action
+                if (this.game.input.isPressed('Space')) {
+                    this.game.addPulse(this.x, this.y);
+                }
+            }
+
+            checkCollisions(nextX, nextY) {
+                let testX = nextX;
+                let testY = this.y;
+                if (!this.checkWallCollision(testX, testY)) {
+                    this.x = testX;
+                }
+
+                testX = this.x; 
+                testY = nextY;
+                if (!this.checkWallCollision(testX, testY)) {
+                    this.y = testY;
+                }
+            }
+
+            checkWallCollision(x, y) {
+                for (let line of this.game.level.lines) {
+                    if (this.lineCircleIntersect(x, y, this.radius, line)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            lineCircleIntersect(cx, cy, r, line) {
+                const distSq = this.distToSegmentSquared(cx, cy, line.x1, line.y1, line.x2, line.y2);
+                return distSq < r * r;
+            }
+
+            distToSegmentSquared(pX, pY, x1, y1, x2, y2) {
+                const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+                if (l2 === 0) return (pX - x1) * (pX - x1) + (pY - y1) * (pY - y1);
+                
+                let t = ((pX - x1) * (x2 - x1) + (pY - y1) * (y2 - y1)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                
+                const distX = pX - (x1 + t * (x2 - x1));
+                const distY = pY - (y1 + t * (y2 - y1));
+                
+                return distX * distX + distY * distY;
+            }
+
+            draw(ctx) {
+                // Invisible player
+                // ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                // ctx.lineWidth = 1;
+                // ctx.beginPath();
+                // ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                // ctx.stroke();
+            }
+        }
+
+        // --- Game.js ---
+        class Game {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.width = canvas.width;
+                this.height = canvas.height;
+                
+                this.input = new InputHandler();
+                this.level = new Level(this); // Level first so player can check
+                this.player = new Player(this);
+                this.pulses = [];
+                this.particles = [];
+                
+                this.lastTime = 0;
+            }
+
+            resize(width, height) {
+                this.width = width;
+                this.height = height;
+                this.canvas.width = width;
+                this.canvas.height = height;
+            }
+
+            addPulse(x, y) {
+                this.pulses.push(new Pulse(this, x, y));
+            }
+
+            addParticle(x, y, color) {
+                this.particles.push(new Particle(this, x, y, color));
+            }
+
+            update(deltaTime) {
+                this.player.update(deltaTime);
+                
+                this.pulses.forEach(p => p.update(deltaTime));
+                this.pulses = this.pulses.filter(p => p.active);
+                
+                this.particles.forEach(p => p.update(deltaTime));
+                this.particles = this.particles.filter(p => p.life > 0);
+                
+                this.level.update(deltaTime);
+
+                // Check Win Condition
+                const dx = this.player.x - this.level.goal.x;
+                const dy = this.player.y - this.level.goal.y;
+                if (Math.sqrt(dx*dx + dy*dy) < this.player.radius + this.level.goal.r) {
+                    // Win Reset
+                    this.player.x = 100;
+                    this.player.y = 100;
+                    for(let i=0; i<50; i++) {
+                        this.addParticle(this.level.goal.x, this.level.goal.y, '#0f0');
+                    }
+                }
+            }
+
+            draw() {
+                this.ctx.fillStyle = '#050505';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                this.level.draw(this.ctx);
+                this.particles.forEach(p => p.draw(this.ctx));
+                this.pulses.forEach(p => p.draw(this.ctx));
+                this.player.draw(this.ctx);
+            }
+
+            loop(timestamp) {
+                const deltaTime = (timestamp - this.lastTime) / 1000;
+                this.lastTime = timestamp;
+
+                if (deltaTime < 0.1) { // Prevent giant jumps if tab suspended
+                    this.update(deltaTime);
+                }
+                this.draw();
+
+                requestAnimationFrame((t) => this.loop(t));
+            }
+
+            start() {
+                this.lastTime = performance.now();
+                requestAnimationFrame((t) => this.loop(t));
+            }
+        }
+
+        // --- main.js ---
+        window.addEventListener('load', () => {
+            const canvas = document.getElementById('gameCanvas');
+            const game = new Game(canvas);
+
+            function resize() {
+                game.resize(window.innerWidth, window.innerHeight);
+            }
+            window.addEventListener('resize', resize);
+            resize(); 
+
+            game.start();
+        });
+    </script>
+</body>
+</html>
