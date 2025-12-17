@@ -2,8 +2,6 @@
 
 **Echoes of the Void** is an atmospheric browser-based exploration game where sound is your sight.
 
-![Echoes of the Void Screenshot](https://raw.githubusercontent.com/vanshdhawan60/echoes-of-the-void/master/screenshot.png)
-*(Note: You might need to add a screenshot to the repo for this link to work perfectly, or just describe it)*
 
 ## 🎮 How to Play
 
@@ -32,7 +30,3 @@ The world is pitch black. You cannot trust your eyes—only your ears (and their
 - [ ] Multiple levels
 - [ ] Moving enemies that react to your pulses
 - [ ] Sound effects and ambient audio
-
----
-
-*Created by Antigravity*
